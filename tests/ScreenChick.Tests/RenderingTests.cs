@@ -536,7 +536,7 @@ public class RenderingTests
             Emit(ComposeAnimationFrame(scene, pointer, cross, key, strip, caret), milliseconds);
 
         // Like Frame, but arrives by fading, so nothing on screen changes abruptly.
-        void Soft(BitmapSource scene, Point? pointer, int milliseconds, bool cross = false, string? key = null, BitmapSource? strip = null, int steps = 6)
+        void Soft(BitmapSource scene, Point? pointer, int milliseconds, bool cross = false, string? key = null, BitmapSource? strip = null, int steps = 9)
         {
             var next = ComposeAnimationFrame(scene, pointer, cross, key, strip, null);
             FadeTo(next, steps);
@@ -558,7 +558,7 @@ public class RenderingTests
 
         var page = SamplePage(english);
         var rest = new Point(300, 440);
-        Soft(page, rest, 500, steps: 10);
+        Soft(page, rest, 500, steps: 18);
         Soft(page, rest, 500, key: "Print Screen");
 
         var shot = new Shot(page, 1.0);
@@ -583,6 +583,22 @@ public class RenderingTests
             }
         }
 
+        void Drag(PixelRect rect, int steps)
+        {
+            overlay.Toolbar.Visibility = Visibility.Hidden;
+            Soft(Render(), new Point(rect.X, rect.Y), AnimationTick, cross: true, steps: 3);
+            for (var i = 1; i <= steps; i++)
+            {
+                var t = Smooth((double)i / steps);
+                var width = (int)Math.Round(rect.Width * t);
+                var height = (int)Math.Round(rect.Height * t);
+                overlay.Surface.DragRect = new PixelRect(rect.X, rect.Y, width, height);
+                Frame(Render(), new Point(rect.X + width, rect.Y + height), AnimationTick, cross: true);
+            }
+            overlay.Surface.DragRect = null;
+            overlay.Toolbar.Visibility = Visibility.Visible;
+        }
+
         Soft(Render(), rest, 350, cross: true);
 
         // First mark: an area dragged around the button.
@@ -590,19 +606,7 @@ public class RenderingTests
         var dragStart = new Point(area.X, area.Y);
         var dragEnd = new Point(area.Right, area.Bottom);
         Move(Render, rest, dragStart, 20, cross: true);
-        overlay.Toolbar.Visibility = Visibility.Hidden;
-        Soft(Render(), dragStart, AnimationTick, cross: true, steps: 3);
-        const int dragSteps = 24;
-        for (var i = 1; i <= dragSteps; i++)
-        {
-            var t = Smooth((double)i / dragSteps);
-            var width = (int)Math.Round(area.Width * t);
-            var height = (int)Math.Round(area.Height * t);
-            overlay.Surface.DragRect = new PixelRect(area.X, area.Y, width, height);
-            Frame(Render(), new Point(area.X + width, area.Y + height), AnimationTick, cross: true);
-        }
-        overlay.Surface.DragRect = null;
-        overlay.Toolbar.Visibility = Visibility.Visible;
+        Drag(area, 24);
         shot.History.Apply(shot.State.AddMark(area));
         Invoke("OpenEditor", 0, true);
         Type(english ? "Make the button brighter and bigger" : "Кнопку ярче и крупнее", dragEnd);
@@ -628,37 +632,81 @@ public class RenderingTests
 
         // The shot waits in the strip until it's pasted.
         var queue = new ShotQueue();
+        BitmapSource StripShowing(string status)
+        {
+            var window = new StripWindow();
+            window.Refresh(queue);
+            window.SetStatus(status, true);
+            return RenderWindowContent(window);
+        }
+
         queue.Add(shot);
-        var stripWindow = new StripWindow();
-        stripWindow.Refresh(queue);
-        stripWindow.SetStatus(L.Shots(1) + " · " + L.Comments(2), true);
-        var strip = RenderWindowContent(stripWindow);
-        Soft(page, aside, 800, strip: strip, steps: 8);
+        var strip = StripShowing(L.Shots(1) + " · " + L.Comments(2));
+        Soft(page, aside, 600, strip: strip, steps: 12);
+
+        // Second shot: crop it down to one card, then mark something inside.
+        Soft(page, aside, 450, key: "Print Screen", strip: strip);
+        var second = new Shot(page, 1.0);
+        overlay = new OverlayWindow(second, 1, new Capture.PixelBounds(0, 0, 1280, 720));
+        Soft(Render(), aside, 250, cross: true, steps: 9);
+
+        overlay.CropTool.IsChecked = true;
+        Soft(Render(), aside, 400, cross: true, key: "3");
+
+        var crop = new PixelRect(838, 186, 344, 490);
+        var cropEnd = new Point(crop.Right, crop.Bottom);
+        Move(Render, aside, new Point(crop.X, crop.Y), 18, cross: true);
+        Drag(crop, 24);
+        second.History.Apply(second.State.ApplyCrop(crop));
+        overlay.MarkTool.IsChecked = true;
+        Soft(Render(), cropEnd, 350, cross: true, steps: 12);
+
+        var item = new PixelRect(872, 430, 256, 30);
+        var itemEnd = new Point(item.Right, item.Bottom);
+        Move(Render, cropEnd, new Point(item.X, item.Y), 16, cross: true);
+        Drag(item, 16);
+        second.History.Apply(second.State.AddMark(item));
+        Invoke("OpenEditor", 0, true);
+        Type(english ? "Remove this item" : "Этот пункт убрать", itemEnd);
+        Soft(shown!, null, 300, key: "Enter", steps: 4);
+        Invoke("CommitEditor");
+        Soft(Render(), itemEnd, 450, cross: true);
+        Soft(Render(), itemEnd, 400, cross: true, key: "Enter");
+
+        queue.Add(second);
+        strip = StripShowing(L.Shots(2) + " · " + L.Comments(3));
+        Soft(page, itemEnd, 700, strip: strip, steps: 12);
 
         var inField = new Point(420, 618);
         var afterPaste = new Point(1000, 618);
-        var final = ShotRenderer.RenderFinal(shot, 0);
-        var comments = MessageFormatter.Format([shot.State]);
-        var empty = RenderAnimationChat(english, final, comments, 0, 0);
-        Soft(empty, aside, 150, strip: strip, steps: 10);
-        Move(() => empty, aside, inField, 20, strip: strip);
+        BitmapSource[] finals = [ShotRenderer.RenderFinal(shot, 0), ShotRenderer.RenderFinal(second, 1)];
+        var comments = MessageFormatter.Format([shot.State, second.State]);
+        BitmapSource Chat(double firstIn, double secondIn, double textIn) =>
+            RenderAnimationChat(english, finals, comments, [firstIn, secondIn], textIn);
+
+        var empty = Chat(0, 0, 0);
+        Soft(empty, itemEnd, 150, strip: strip, steps: 16);
+        Move(() => empty, itemEnd, inField, 20, strip: strip);
         Soft(empty, inField, 500, key: "Ctrl+V", strip: strip);
         Soft(empty, inField, AnimationTick, strip: strip, steps: 3);
 
-        // Images land first and the field grows around them, then the comments follow.
+        // Images land one after another and the field grows around them, then the comments follow.
         const int pasteSteps = 16;
         for (var i = 1; i <= pasteSteps; i++)
         {
             var t = Smooth((double)i / pasteSteps);
-            Frame(RenderAnimationChat(english, final, comments, t, 0), Between(inField, afterPaste, t), AnimationTick, strip: strip);
+            Frame(Chat(t, 0, 0), Between(inField, afterPaste, t), AnimationTick, strip: strip);
         }
-        Frame(RenderAnimationChat(english, final, comments, 1, 0), afterPaste, 250, strip: strip);
+        Frame(Chat(1, 0, 0), afterPaste, 200, strip: strip);
         for (var i = 1; i <= pasteSteps; i++)
-            Frame(RenderAnimationChat(english, final, comments, 1, Smooth((double)i / pasteSteps)), afterPaste, AnimationTick, strip: strip);
-        Frame(RenderAnimationChat(english, final, comments, 1, 1), afterPaste, 3500, strip: strip);
+            Frame(Chat(1, Smooth((double)i / pasteSteps), 0), afterPaste, AnimationTick, strip: strip);
+        Frame(Chat(1, 1, 0), afterPaste, 250, strip: strip);
+        for (var i = 1; i <= pasteSteps; i++)
+            Frame(Chat(1, 1, Smooth((double)i / pasteSteps)), afterPaste, AnimationTick, strip: strip);
+        Frame(Chat(1, 1, 1), afterPaste, 4000, strip: strip);
 
         // Back to the opening frame, so the loop has no seam.
-        FadeTo(opening!, 12);
+        FadeTo(opening!, 18);
     }
 
     private const int AnimationTick = 30;
@@ -728,15 +776,15 @@ public class RenderingTests
         }
 
         pose = pose with { Badge = 1 };
-        const int fade = 12;
+        const int fade = 20;
         for (var i = 1; i <= fade; i++)
             yield return (RenderIntro(art, pose with { Tagline = Smooth((double)i / fade) }), AnimationTick);
 
         pose = pose with { Tagline = 1 };
-        yield return (RenderIntro(art, pose), 350);
+        yield return (RenderIntro(art, pose), 1100);
         foreach (var shut in new[] { 0.5, 1, 0.5 })
             yield return (RenderIntro(art, pose with { Blink = shut }), 50);
-        yield return (RenderIntro(art, pose), 500);
+        yield return (RenderIntro(art, pose), 1300);
     }
 
     private static double EaseOutBack(double t)
@@ -938,10 +986,10 @@ public class RenderingTests
         dc.DrawGeometry(Brushes.White, FrozenPen(PageInk, 1.25), arrow);
     }
 
-    /// <summary>A made-up chat whose field grows as the pasted image and comments arrive. Those two are whatever the app really pasted.</summary>
-    private static BitmapSource RenderAnimationChat(bool english, BitmapSource image, string comments, double imageIn, double textIn)
+    /// <summary>A made-up chat whose field grows as the pasted images and comments arrive. Those are whatever the app really pasted.</summary>
+    private static BitmapSource RenderAnimationChat(bool english, IReadOnlyList<BitmapSource> images, string comments, IReadOnlyList<double> imagesIn, double textIn)
     {
-        const double left = 56, width = 900, bottom = 650, padding = 20, imageHeight = 280, emptyHeight = 64;
+        const double left = 56, width = 900, bottom = 650, padding = 20, imageHeight = 280, emptyHeight = 64, gap = 12;
         string T(string russian, string other) => english ? other : russian;
 
         var message = PageText(comments, 16, PageInk);
@@ -949,7 +997,7 @@ public class RenderingTests
         message.LineHeight = 24;
 
         var withImage = padding + imageHeight + padding;
-        var height = emptyHeight + (withImage - emptyHeight) * imageIn + (message.Height + padding) * textIn;
+        var height = emptyHeight + (withImage - emptyHeight) * imagesIn[0] + (message.Height + padding) * textIn;
         var top = bottom - height;
         var field = new Rect(left, top, width, height);
 
@@ -963,26 +1011,31 @@ public class RenderingTests
             dc.DrawText(PageText(T("Чат", "Chat"), 20, PageInk, FontWeights.SemiBold), new Point(left, 14));
 
             var question = PageText(T("Что поправить на странице тарифов?", "What should change on the pricing page?"), 16, PageInk);
-            dc.DrawRoundedRectangle(Brushes.White, PageLine, new Rect(left, 136, question.Width + 36, question.Height + 24), 14, 14);
-            dc.DrawText(question, new Point(left + 18, 148));
+            dc.DrawRoundedRectangle(Brushes.White, PageLine, new Rect(left, 76, question.Width + 36, question.Height + 24), 14, 14);
+            dc.DrawText(question, new Point(left + 18, 88));
 
             dc.DrawRoundedRectangle(Brushes.White, PageLine, field, 18, 18);
             dc.PushClip(new RectangleGeometry(field, 18, 18));
 
-            dc.PushOpacity(1 - imageIn);
+            dc.PushOpacity(1 - imagesIn[0]);
             dc.DrawText(PageText(T("Напишите сообщение…", "Write a message…"), 16, PageFaint), new Point(left + padding, bottom - emptyHeight + 21));
             dc.Pop();
 
-            var slot = new Rect(left + padding, top + padding, imageHeight * image.PixelWidth / image.PixelHeight, imageHeight);
-            dc.PushOpacity(imageIn);
-            dc.PushClip(new RectangleGeometry(slot, 10, 10));
-            dc.DrawImage(image, slot);
-            dc.Pop();
-            dc.DrawRoundedRectangle(null, PageLine, slot, 10, 10);
-            dc.Pop();
+            var x = left + padding;
+            for (var i = 0; i < images.Count; i++)
+            {
+                var slot = new Rect(x, top + padding, imageHeight * images[i].PixelWidth / images[i].PixelHeight, imageHeight);
+                dc.PushOpacity(imagesIn[i]);
+                dc.PushClip(new RectangleGeometry(slot, 10, 10));
+                dc.DrawImage(images[i], slot);
+                dc.Pop();
+                dc.DrawRoundedRectangle(null, PageLine, slot, 10, 10);
+                dc.Pop();
+                x += slot.Width + gap;
+            }
 
             dc.PushOpacity(textIn);
-            dc.DrawText(message, new Point(left + padding, slot.Bottom + padding));
+            dc.DrawText(message, new Point(left + padding, top + padding + imageHeight + padding));
             dc.Pop();
             dc.Pop();
 
