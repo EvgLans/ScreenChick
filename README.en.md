@@ -17,9 +17,9 @@
 </p>
 
 <p align="center">
-  <img src="docs/overlay-en.png" alt="Capture mode: numbered marks with comments, a redacted email address and the toolbar" width="100%">
+  <img src="docs/demo-en.gif" alt="Animation: capturing a pricing page, adding two marks with comments and pasting the shot and comments into a chat with Ctrl+V" width="100%">
 </p>
-<p align="center"><sub>The pricing page is made up. The marks and the toolbar are real, drawn by the app itself.</sub></p>
+<p align="center"><sub>The pricing page and the chat are made up. The marks, the toolbar and the strip are real, drawn by the app itself.</sub></p>
 
 ## How it works
 
@@ -139,7 +139,7 @@ winget install --id JRSoftware.InnoSetup -e --scope user
 powershell -ExecutionPolicy Bypass -File installer\build.ps1
 ```
 
-Setting `SCREENCHICK_PREVIEW_DIR=<folder>` while running the tests also writes PNGs of the windows, rendered offscreen. That's where the pictures on this page come from.
+Setting `SCREENCHICK_PREVIEW_DIR=<folder>` while running the tests also writes PNGs of the windows, rendered offscreen. That's where the pictures on this page come from. `installer\make-animation.ps1` builds the animation.
 
 </details>
 

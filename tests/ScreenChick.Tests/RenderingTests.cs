@@ -484,12 +484,517 @@ public class RenderingTests
         Save(RenderChatField([shot, second]), Path.Combine(dir, $"chat{suffix}.png"));
     }
 
-    private static void SaveWindowContent(Window window, string path)
+    private static void SaveWindowContent(Window window, string path) => Save(RenderWindowContent(window), path);
+
+    private static BitmapSource RenderWindowContent(Window window)
     {
         var content = (FrameworkElement)window.Content;
         window.Content = null;
         content.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-        Save(RenderElement(content, (int)Math.Ceiling(content.DesiredSize.Width), (int)Math.Ceiling(content.DesiredSize.Height)), path);
+        return RenderElement(content, (int)Math.Ceiling(content.DesiredSize.Width), (int)Math.Ceiling(content.DesiredSize.Height));
+    }
+
+    /// <summary>Set SCREENCHICK_ANIMATION_DIR to write the README animation's frames; installer\make-animation.ps1 turns them into GIFs.</summary>
+    [Fact]
+    public void Writes_animation_frames_when_asked() => OnSta(() =>
+    {
+        var dir = Environment.GetEnvironmentVariable("SCREENCHICK_ANIMATION_DIR");
+        if (string.IsNullOrEmpty(dir)) return;
+
+        L.Use(UiLanguage.Russian);
+        WriteAnimationFrames(Path.Combine(dir, "ru"), english: false);
+
+        L.Use(UiLanguage.English);
+        try { WriteAnimationFrames(Path.Combine(dir, "en"), english: true); }
+        finally { L.Use(UiLanguage.Russian); }
+    });
+
+    /// <summary>Capture, two marks, Ctrl+V. The overlay, strip and pasted content are the app's own; the page, chat, pointer and key hints are drawn here.</summary>
+    private static void WriteAnimationFrames(string dir, bool english)
+    {
+        Directory.CreateDirectory(dir);
+        foreach (var old in Directory.GetFiles(dir, "*.png")) File.Delete(old);
+
+        var count = 0;
+        BitmapSource? shown = null;
+
+        // Fade frames are marked so the palette is built from the settled frames only.
+        void Emit(BitmapSource image, int milliseconds, bool fade = false)
+        {
+            Save(image, Path.Combine(dir, $"{count++:D4}_{milliseconds}{(fade ? "_f" : "")}.png"));
+            shown = image;
+        }
+
+        void FadeTo(BitmapSource next, int steps)
+        {
+            var from = shown!;
+            for (var i = 1; i <= steps; i++)
+                Emit(BlendFrames(from, next, Smooth((double)i / (steps + 1))), AnimationTick, fade: true);
+        }
+
+        void Frame(BitmapSource scene, Point? pointer, int milliseconds, bool cross = false, string? key = null, BitmapSource? strip = null, Rect? caret = null) =>
+            Emit(ComposeAnimationFrame(scene, pointer, cross, key, strip, caret), milliseconds);
+
+        // Like Frame, but arrives by fading, so nothing on screen changes abruptly.
+        void Soft(BitmapSource scene, Point? pointer, int milliseconds, bool cross = false, string? key = null, BitmapSource? strip = null, int steps = 6)
+        {
+            var next = ComposeAnimationFrame(scene, pointer, cross, key, strip, null);
+            FadeTo(next, steps);
+            Emit(next, milliseconds);
+        }
+
+        void Move(Func<BitmapSource> scene, Point from, Point to, int steps, bool cross = false, BitmapSource? strip = null)
+        {
+            for (var i = 1; i <= steps; i++)
+                Frame(scene(), Between(from, to, Smooth((double)i / steps)), AnimationTick, cross, strip: strip);
+        }
+
+        var opening = default(BitmapSource);
+        foreach (var (image, milliseconds) in AnimationIntro(english))
+        {
+            opening ??= image;
+            Emit(image, milliseconds);
+        }
+
+        var page = SamplePage(english);
+        var rest = new Point(300, 440);
+        Soft(page, rest, 500, steps: 10);
+        Soft(page, rest, 500, key: "Print Screen");
+
+        var shot = new Shot(page, 1.0);
+        var overlay = new OverlayWindow(shot, 0, new Capture.PixelBounds(0, 0, 1280, 720));
+        BitmapSource Render() { overlay.Surface.InvalidateVisual(); return RenderElement(overlay.Root, 1280, 720); }
+        void Invoke(string method, params object[] args) => typeof(OverlayWindow)
+            .GetMethod(method, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.Invoke(overlay, args);
+
+        void Type(string comment, Point pointer)
+        {
+            // The editor fades in empty, then the text comes one letter at a time.
+            overlay.CommentBox.Text = "";
+            Soft(Render(), pointer, 120, cross: true);
+            for (var length = 1; length <= comment.Length; length++)
+            {
+                overlay.CommentBox.Text = comment[..length];
+                overlay.CommentBox.CaretIndex = length;
+                var scene = Render();
+                var position = overlay.CommentBox.GetRectFromCharacterIndex(length);
+                var caret = overlay.CommentBox.TransformToAncestor(overlay.Root).TransformBounds(position);
+                Frame(scene, pointer, length == comment.Length ? 450 : 40, cross: true, caret: new Rect(caret.X, caret.Y, 1.5, caret.Height));
+            }
+        }
+
+        Soft(Render(), rest, 350, cross: true);
+
+        // First mark: an area dragged around the button.
+        var area = new PixelRect(498, 582, 284, 64);
+        var dragStart = new Point(area.X, area.Y);
+        var dragEnd = new Point(area.Right, area.Bottom);
+        Move(Render, rest, dragStart, 20, cross: true);
+        overlay.Toolbar.Visibility = Visibility.Hidden;
+        Soft(Render(), dragStart, AnimationTick, cross: true, steps: 3);
+        const int dragSteps = 24;
+        for (var i = 1; i <= dragSteps; i++)
+        {
+            var t = Smooth((double)i / dragSteps);
+            var width = (int)Math.Round(area.Width * t);
+            var height = (int)Math.Round(area.Height * t);
+            overlay.Surface.DragRect = new PixelRect(area.X, area.Y, width, height);
+            Frame(Render(), new Point(area.X + width, area.Y + height), AnimationTick, cross: true);
+        }
+        overlay.Surface.DragRect = null;
+        overlay.Toolbar.Visibility = Visibility.Visible;
+        shot.History.Apply(shot.State.AddMark(area));
+        Invoke("OpenEditor", 0, true);
+        Type(english ? "Make the button brighter and bigger" : "Кнопку ярче и крупнее", dragEnd);
+        Soft(shown!, null, 300, key: "Enter", steps: 4);
+        Invoke("CommitEditor");
+        Soft(Render(), dragEnd, 350, cross: true);
+
+        // Second mark: a click on the typo.
+        var typo = new Point(english ? 682 : 742, 443);
+        Move(Render, dragEnd, typo, 18, cross: true);
+        shot.History.Apply(shot.State.AddMark(new PixelRect((int)typo.X, (int)typo.Y, 0, 0)));
+        Invoke("OpenEditor", 1, true);
+        Type(english ? "Typo: “projects”" : "Опечатка", typo);
+        Soft(shown!, null, 300, key: "Enter", steps: 4);
+        Invoke("CommitEditor");
+        Soft(Render(), typo, 60, cross: true);
+
+        // The pointer steps aside so the new mark can be read.
+        var aside = new Point(typo.X - 60, typo.Y + 70);
+        Move(Render, typo, aside, 12, cross: true);
+        Frame(Render(), aside, 450, cross: true);
+        Soft(Render(), aside, 400, cross: true, key: "Enter");
+
+        // The shot waits in the strip until it's pasted.
+        var queue = new ShotQueue();
+        queue.Add(shot);
+        var stripWindow = new StripWindow();
+        stripWindow.Refresh(queue);
+        stripWindow.SetStatus(L.Shots(1) + " · " + L.Comments(2), true);
+        var strip = RenderWindowContent(stripWindow);
+        Soft(page, aside, 800, strip: strip, steps: 8);
+
+        var inField = new Point(420, 618);
+        var afterPaste = new Point(1000, 618);
+        var final = ShotRenderer.RenderFinal(shot, 0);
+        var comments = MessageFormatter.Format([shot.State]);
+        var empty = RenderAnimationChat(english, final, comments, 0, 0);
+        Soft(empty, aside, 150, strip: strip, steps: 10);
+        Move(() => empty, aside, inField, 20, strip: strip);
+        Soft(empty, inField, 500, key: "Ctrl+V", strip: strip);
+        Soft(empty, inField, AnimationTick, strip: strip, steps: 3);
+
+        // Images land first and the field grows around them, then the comments follow.
+        const int pasteSteps = 16;
+        for (var i = 1; i <= pasteSteps; i++)
+        {
+            var t = Smooth((double)i / pasteSteps);
+            Frame(RenderAnimationChat(english, final, comments, t, 0), Between(inField, afterPaste, t), AnimationTick, strip: strip);
+        }
+        Frame(RenderAnimationChat(english, final, comments, 1, 0), afterPaste, 250, strip: strip);
+        for (var i = 1; i <= pasteSteps; i++)
+            Frame(RenderAnimationChat(english, final, comments, 1, Smooth((double)i / pasteSteps)), afterPaste, AnimationTick, strip: strip);
+        Frame(RenderAnimationChat(english, final, comments, 1, 1), afterPaste, 3500, strip: strip);
+
+        // Back to the opening frame, so the loop has no seam.
+        FadeTo(opening!, 12);
+    }
+
+    private const int AnimationTick = 30;
+
+    private static double Smooth(double t) => t * t * (3 - 2 * t);
+
+    private static Point Between(Point a, Point b, double t) => new(a.X + (b.X - a.X) * t, a.Y + (b.Y - a.Y) * t);
+
+    private static BitmapSource BlendFrames(BitmapSource from, BitmapSource to, double amount)
+    {
+        var visual = new DrawingVisual();
+        using (var dc = visual.RenderOpen())
+        {
+            dc.DrawImage(from, new Rect(0, 0, 1280, 720));
+            dc.PushOpacity(amount);
+            dc.DrawImage(to, new Rect(0, 0, 1280, 720));
+            dc.Pop();
+        }
+        var image = new RenderTargetBitmap(1280, 720, 96, 96, PixelFormats.Pbgra32);
+        image.Render(visual);
+        image.Freeze();
+        return image;
+    }
+
+    /// <summary>The banner comes alive the way the app works: the word gets circled and marked, and the chick is pleased.</summary>
+    private static IEnumerable<(BitmapSource Image, int Milliseconds)> AnimationIntro(bool english)
+    {
+        var art = LoadIntroArt(english);
+        var pose = new IntroPose();
+        var corner = new Point(IntroFrame.X, IntroFrame.Y);
+        var farCorner = new Point(IntroFrame.Right, IntroFrame.Bottom);
+
+        yield return (RenderIntro(art, pose), 350);
+
+        foreach (var shut in new[] { 0.5, 1, 0.5 })
+            yield return (RenderIntro(art, pose with { Blink = shut }), 50);
+        yield return (RenderIntro(art, pose), 150);
+
+        const int approach = 16;
+        for (var i = 1; i <= approach; i++)
+        {
+            var t = Smooth((double)i / approach);
+            yield return (RenderIntro(art, pose with { Cross = Between(new Point(830, 60), corner, t), CrossOpacity = t }), AnimationTick);
+        }
+
+        const int drag = 22;
+        for (var i = 1; i <= drag; i++)
+        {
+            var t = Smooth((double)i / drag);
+            yield return (RenderIntro(art, pose with { Outline = t, Cross = Between(corner, farCorner, t), CrossOpacity = 1 }), AnimationTick);
+        }
+
+        pose = pose with { Outline = 1 };
+        const int hop = 26;
+        for (var i = 1; i <= hop; i++)
+        {
+            var t = (double)i / hop;
+            yield return (RenderIntro(art, pose with
+            {
+                Badge = EaseOutBack(Math.Min(1, t * 2)),
+                Lift = 20 * Math.Sin(Math.PI * t),
+                Tilt = -5 * Math.Sin(2 * Math.PI * t),
+                Pulse = 0.05 * Math.Sin(Math.PI * t),
+                Cross = Between(farCorner, new Point(farCorner.X + 50, farCorner.Y + 30), Smooth(t)),
+                CrossOpacity = 1 - Smooth(Math.Min(1, t * 2)),
+            }), AnimationTick);
+        }
+
+        pose = pose with { Badge = 1 };
+        const int fade = 12;
+        for (var i = 1; i <= fade; i++)
+            yield return (RenderIntro(art, pose with { Tagline = Smooth((double)i / fade) }), AnimationTick);
+
+        pose = pose with { Tagline = 1 };
+        yield return (RenderIntro(art, pose), 350);
+        foreach (var shut in new[] { 0.5, 1, 0.5 })
+            yield return (RenderIntro(art, pose with { Blink = shut }), 50);
+        yield return (RenderIntro(art, pose), 500);
+    }
+
+    private static double EaseOutBack(double t)
+    {
+        const double overshoot = 1.70158;
+        var rest = t - 1;
+        return 1 + (overshoot + 1) * rest * rest * rest + overshoot * rest * rest;
+    }
+
+    /// <summary>All positions are in the banner's own pixels, so they follow make-art.ps1's layout.</summary>
+    private readonly record struct IntroPose(double Outline, double Badge, double Lift, double Tilt, double Pulse, double Blink, double Tagline, Point? Cross, double CrossOpacity);
+
+    private sealed record IntroArt(BitmapSource Brackets, BitmapSource Duck, BitmapSource Screen, BitmapSource Chick, BitmapSource Badge, Color Night, FormattedText Tagline);
+
+    private static readonly Int32Rect IntroDuck = new(146, 86, 224, 224);
+    private static readonly Int32Rect IntroBrackets = new(110, 50, 300, 300);
+    private static readonly Int32Rect IntroScreen = new(470, 140, 470, 140);
+    private static readonly Int32Rect IntroChick = new(957, 146, 403, 134);
+    private static readonly Int32Rect IntroBadge = new(944, 84, 101, 54);
+    private static readonly Rect IntroFrame = new(951, 140, 414, 145);
+
+    private static IntroArt LoadIntroArt(bool english)
+    {
+        var folder = new DirectoryInfo(AppContext.BaseDirectory);
+        while (!File.Exists(Path.Combine(folder.FullName, "docs", "banner.png"))) folder = folder.Parent!;
+
+        var banner = new BitmapImage();
+        banner.BeginInit();
+        banner.CacheOption = BitmapCacheOption.OnLoad;
+        banner.UriSource = new Uri(Path.Combine(folder.FullName, "docs", "banner.png"));
+        banner.EndInit();
+        banner.Freeze();
+
+        var night = PixelAt(banner, banner.PixelWidth / 2, 20);
+        var tagline = PageText(english
+            ? "Circle it, comment it, press Ctrl+V. The chat knows exactly what you mean."
+            : "Обвёл, подписал, нажал Ctrl+V. Чат сразу понял, о чём ты.", 26, Brushes.White);
+
+        return new IntroArt(
+            BannerPart(banner, IntroBrackets, night, cut: IntroDuck),
+            BannerPart(banner, IntroDuck, night),
+            BannerPart(banner, IntroScreen, night),
+            BannerPart(banner, IntroChick, night),
+            BannerPart(banner, IntroBadge, night),
+            night, tagline);
+    }
+
+    /// <summary>A piece of the banner with its background cleared, so pieces can move over each other.</summary>
+    private static BitmapSource BannerPart(BitmapSource banner, Int32Rect region, Color night, Int32Rect? cut = null)
+    {
+        var stride = region.Width * 4;
+        var pixels = new byte[stride * region.Height];
+        new FormatConvertedBitmap(banner, PixelFormats.Bgra32, null, 0).CopyPixels(region, pixels, stride, 0);
+
+        for (var y = 0; y < region.Height; y++)
+        {
+            for (var x = 0; x < region.Width; x++)
+            {
+                var i = y * stride + x * 4;
+                var cleared = cut is { } c
+                    && region.X + x >= c.X && region.X + x < c.X + c.Width
+                    && region.Y + y >= c.Y && region.Y + y < c.Y + c.Height;
+                if (cleared || (pixels[i] == night.B && pixels[i + 1] == night.G && pixels[i + 2] == night.R)) pixels[i + 3] = 0;
+            }
+        }
+
+        var part = BitmapSource.Create(region.Width, region.Height, 96, 96, PixelFormats.Bgra32, null, pixels, stride);
+        part.Freeze();
+        return part;
+    }
+
+    private static BitmapSource RenderIntro(IntroArt art, IntroPose pose)
+    {
+        const double scale = 0.7, offsetX = 80, offsetY = 150, eyeRadius = 14;
+        var beak = FrozenBrush(0xF4, 0x51, 0x1E);
+        var eye = new Point(294, 150);
+
+        static Rect Place(Int32Rect region) => new(region.X, region.Y, region.Width, region.Height);
+
+        var visual = new DrawingVisual();
+        RenderOptions.SetBitmapScalingMode(visual, BitmapScalingMode.Fant);
+        using (var dc = visual.RenderOpen())
+        {
+            dc.DrawRectangle(FrozenBrush(art.Night.R, art.Night.G, art.Night.B), null, new Rect(0, 0, 1280, 720));
+
+            dc.PushTransform(new TranslateTransform(offsetX, offsetY));
+            dc.PushTransform(new ScaleTransform(scale, scale));
+
+            dc.PushTransform(new ScaleTransform(1 + pose.Pulse, 1 + pose.Pulse, 260, 200));
+            dc.DrawImage(art.Brackets, Place(IntroBrackets));
+            dc.Pop();
+
+            dc.PushTransform(new TranslateTransform(0, -pose.Lift));
+            dc.PushTransform(new RotateTransform(pose.Tilt, 257, 305));
+            dc.DrawImage(art.Duck, Place(IntroDuck));
+            if (pose.Blink > 0)
+            {
+                dc.PushClip(new RectangleGeometry(new Rect(eye.X - eyeRadius, eye.Y - eyeRadius, 2 * eyeRadius, 2 * eyeRadius * pose.Blink)));
+                dc.DrawEllipse(FrozenBrush(0xFF, 0xC4, 0x00), null, eye, eyeRadius, eyeRadius);
+                dc.Pop();
+                var lid = eye.Y - eyeRadius + 2 * eyeRadius * pose.Blink;
+                dc.DrawLine(FrozenPen(PageInk, 3), new Point(eye.X - eyeRadius + 2, lid), new Point(eye.X + eyeRadius - 2, lid));
+            }
+            dc.Pop();
+            dc.Pop();
+
+            dc.DrawImage(art.Screen, Place(IntroScreen));
+            dc.DrawImage(art.Chick, Place(IntroChick));
+
+            if (pose.Outline > 0)
+            {
+                var drawn = new Rect(IntroFrame.X, IntroFrame.Y, IntroFrame.Width * pose.Outline, IntroFrame.Height * pose.Outline);
+                var radius = Math.Min(12, Math.Min(drawn.Width, drawn.Height) / 2);
+                dc.DrawRoundedRectangle(null, FrozenPen(beak, 5.5), drawn, radius, radius);
+            }
+
+            if (pose.Badge > 0)
+            {
+                dc.PushTransform(new ScaleTransform(pose.Badge, pose.Badge, IntroBadge.X, IntroBadge.Y + IntroBadge.Height));
+                dc.DrawImage(art.Badge, Place(IntroBadge));
+                dc.Pop();
+            }
+
+            dc.Pop();
+            dc.Pop();
+
+            if (pose.Tagline > 0)
+            {
+                dc.PushOpacity(pose.Tagline);
+                DrawCentered(dc, art.Tagline, 640, 480);
+                dc.Pop();
+            }
+
+            if (pose.Cross is { } cross)
+            {
+                dc.PushOpacity(pose.CrossOpacity);
+                DrawCrosshair(dc, new Point(offsetX + cross.X * scale, offsetY + cross.Y * scale));
+                dc.Pop();
+            }
+        }
+
+        var image = new RenderTargetBitmap(1280, 720, 96, 96, PixelFormats.Pbgra32);
+        image.Render(visual);
+        image.Freeze();
+        return image;
+    }
+
+    private static BitmapSource ComposeAnimationFrame(BitmapSource scene, Point? pointer, bool cross, string? key, BitmapSource? strip, Rect? caret)
+    {
+        var visual = new DrawingVisual();
+        RenderOptions.SetBitmapScalingMode(visual, BitmapScalingMode.Fant);
+        using (var dc = visual.RenderOpen())
+        {
+            dc.DrawImage(scene, new Rect(0, 0, 1280, 720));
+            if (strip != null)
+                dc.DrawImage(strip, new Rect(1280 - strip.PixelWidth - 8, (720 - strip.PixelHeight) / 2, strip.PixelWidth, strip.PixelHeight));
+            if (caret is { } line) dc.DrawRectangle(PageInk, null, line);
+
+            if (key != null)
+            {
+                // The strip of page below the cards, so a hint never covers what it's talking about.
+                var label = PageText(key, 22, FrozenBrush(0xFF, 0xC4, 0x00), FontWeights.Bold);
+                var pill = new Rect(640 - label.Width / 2 - 20, 670, label.Width + 40, label.Height + 12);
+                dc.DrawRoundedRectangle(FrozenBrush(0x20, 0x21, 0x24), null, pill, 10, 10);
+                dc.DrawText(label, new Point(pill.X + 20, pill.Y + 6));
+            }
+
+            if (pointer is { } at)
+            {
+                if (cross) DrawCrosshair(dc, at);
+                else DrawArrow(dc, at);
+            }
+        }
+        var image = new RenderTargetBitmap(1280, 720, 96, 96, PixelFormats.Pbgra32);
+        image.Render(visual);
+        image.Freeze();
+        return image;
+    }
+
+    private static void DrawCrosshair(DrawingContext dc, Point p)
+    {
+        const double reach = 11;
+        foreach (var (pen, extra) in new[] { (FrozenPen(Brushes.White, 3.5), 1.0), (FrozenPen(PageInk, 1.5), 0.0) })
+        {
+            dc.DrawLine(pen, new Point(p.X - reach - extra, p.Y), new Point(p.X + reach + extra, p.Y));
+            dc.DrawLine(pen, new Point(p.X, p.Y - reach - extra), new Point(p.X, p.Y + reach + extra));
+        }
+    }
+
+    private static void DrawArrow(DrawingContext dc, Point p)
+    {
+        Point At(double x, double y) => new(p.X + x * 1.25, p.Y + y * 1.25);
+        var arrow = new StreamGeometry();
+        using (var path = arrow.Open())
+        {
+            path.BeginFigure(At(0, 0), isFilled: true, isClosed: true);
+            path.PolyLineTo([At(0, 18), At(4.5, 14), At(7.5, 21), At(10.5, 20), At(7.5, 13), At(13, 13)], isStroked: true, isSmoothJoin: false);
+        }
+        dc.DrawGeometry(Brushes.White, FrozenPen(PageInk, 1.25), arrow);
+    }
+
+    /// <summary>A made-up chat whose field grows as the pasted image and comments arrive. Those two are whatever the app really pasted.</summary>
+    private static BitmapSource RenderAnimationChat(bool english, BitmapSource image, string comments, double imageIn, double textIn)
+    {
+        const double left = 56, width = 900, bottom = 650, padding = 20, imageHeight = 280, emptyHeight = 64;
+        string T(string russian, string other) => english ? other : russian;
+
+        var message = PageText(comments, 16, PageInk);
+        message.MaxTextWidth = width - 2 * padding - 56;
+        message.LineHeight = 24;
+
+        var withImage = padding + imageHeight + padding;
+        var height = emptyHeight + (withImage - emptyHeight) * imageIn + (message.Height + padding) * textIn;
+        var top = bottom - height;
+        var field = new Rect(left, top, width, height);
+
+        var visual = new DrawingVisual();
+        RenderOptions.SetBitmapScalingMode(visual, BitmapScalingMode.Fant);
+        using (var dc = visual.RenderOpen())
+        {
+            dc.DrawRectangle(FrozenBrush(0xF6, 0xF7, 0xF9), null, new Rect(0, 0, 1280, 720));
+            dc.DrawRectangle(Brushes.White, null, new Rect(0, 0, 1280, 56));
+            dc.DrawLine(PageLine, new Point(0, 56), new Point(1280, 56));
+            dc.DrawText(PageText(T("Чат", "Chat"), 20, PageInk, FontWeights.SemiBold), new Point(left, 14));
+
+            var question = PageText(T("Что поправить на странице тарифов?", "What should change on the pricing page?"), 16, PageInk);
+            dc.DrawRoundedRectangle(Brushes.White, PageLine, new Rect(left, 136, question.Width + 36, question.Height + 24), 14, 14);
+            dc.DrawText(question, new Point(left + 18, 148));
+
+            dc.DrawRoundedRectangle(Brushes.White, PageLine, field, 18, 18);
+            dc.PushClip(new RectangleGeometry(field, 18, 18));
+
+            dc.PushOpacity(1 - imageIn);
+            dc.DrawText(PageText(T("Напишите сообщение…", "Write a message…"), 16, PageFaint), new Point(left + padding, bottom - emptyHeight + 21));
+            dc.Pop();
+
+            var slot = new Rect(left + padding, top + padding, imageHeight * image.PixelWidth / image.PixelHeight, imageHeight);
+            dc.PushOpacity(imageIn);
+            dc.PushClip(new RectangleGeometry(slot, 10, 10));
+            dc.DrawImage(image, slot);
+            dc.Pop();
+            dc.DrawRoundedRectangle(null, PageLine, slot, 10, 10);
+            dc.Pop();
+
+            dc.PushOpacity(textIn);
+            dc.DrawText(message, new Point(left + padding, slot.Bottom + padding));
+            dc.Pop();
+            dc.Pop();
+
+            var send = new Point(left + width - 34, bottom - 32);
+            dc.DrawEllipse(FrozenBrush(0xFF, 0xC4, 0x00), null, send, 20, 20);
+            DrawCentered(dc, PageText("↑", 20, PageInk, FontWeights.Bold), send.X, send.Y - 14);
+        }
+
+        var result = new RenderTargetBitmap(1280, 720, 96, 96, PixelFormats.Pbgra32);
+        result.Render(visual);
+        result.Freeze();
+        return result;
     }
 
     private static readonly Brush PageInk = FrozenBrush(0x20, 0x21, 0x24);
