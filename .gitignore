@@ -1,0 +1,8 @@
+bin/
+obj/
+dist/
+installer/publish/
+TestResults/
+.vs/
+.vscode/
+*.user
