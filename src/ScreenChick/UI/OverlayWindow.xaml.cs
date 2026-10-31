@@ -5,6 +5,7 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using ScreenChick.Capture;
 using ScreenChick.Input;
+using ScreenChick.Localization;
 using ScreenChick.Model;
 using ScreenChick.Native;
 using ScreenChick.Rendering;
@@ -362,7 +363,7 @@ public partial class OverlayWindow : Window
         }
 
         _escapeArmed = true;
-        ToastText.Text = "Правки пропадут. Нажми Esc ещё раз, чтобы выйти без сохранения";
+        ToastText.Text = L.DiscardWarning;
         Toast.Visibility = Visibility.Visible;
     }
 

@@ -3,6 +3,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media.Imaging;
+using ScreenChick.Localization;
 using ScreenChick.Model;
 using ScreenChick.Native;
 using ScreenChick.Rendering;
@@ -39,7 +40,7 @@ public partial class StripWindow : Window
         Rows.ItemsSource = shots.Select((shot, i) => new StripRow(
             i,
             ShotQueue.LetterOf(i).ToString(),
-            MessageFormatter.Plural(shot.State.CommentCount, "комментарий", "комментария", "комментариев"),
+            L.Comments(shot.State.CommentCount),
             ShotRenderer.RenderThumbnail(shot, i, 104, 68))).ToList();
 
         CountText.Text = shots.Count.ToString();
@@ -48,7 +49,7 @@ public partial class StripWindow : Window
     public void SetStatus(string text, bool armed)
     {
         StatusText.Text = text;
-        PasteButton.Content = armed ? "Вставить · Ctrl+V" : "Вставить";
+        PasteButton.Content = armed ? L.StripPasteArmed : L.StripPaste;
     }
 
     private void ApplyWindowStyles()

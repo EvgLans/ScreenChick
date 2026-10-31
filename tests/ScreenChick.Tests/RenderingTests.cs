@@ -3,6 +3,7 @@ using System.Runtime.ExceptionServices;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using ScreenChick.Localization;
 using ScreenChick.Model;
 using ScreenChick.Paste;
 using ScreenChick.Rendering;
@@ -439,8 +440,7 @@ public class RenderingTests
         if (string.IsNullOrEmpty(dir)) return;
         Directory.CreateDirectory(dir);
 
-        var shot = SampleShot();
-        Save(ShotRenderer.RenderFinal(shot, 0), Path.Combine(dir, "final.png"));
+        Save(ShotRenderer.RenderFinal(SampleShot(english: false), 0), Path.Combine(dir, "final.png"));
 
         PixelRect[] selections =
         [
@@ -454,42 +454,199 @@ public class RenderingTests
             Save(ShotRenderer.RenderFinal(corner, 0), Path.Combine(dir, $"selection-{i}.png"));
         }
 
+        WriteWindowPreviews(dir, "", english: false);
+
+        L.Use(UiLanguage.English);
+        try { WriteWindowPreviews(dir, "-en", english: true); }
+        finally { L.Use(UiLanguage.Russian); }
+    });
+
+    /// <summary>The pictures in the READMEs. Windows read their text when created, so each language gets its own.</summary>
+    private static void WriteWindowPreviews(string dir, string suffix, bool english)
+    {
+        var shot = SampleShot(english);
+        var second = SecondSampleShot(english);
+
         var overlay = new OverlayWindow(shot, 0, new Capture.PixelBounds(0, 0, 1280, 720));
-        Save(RenderElement(overlay.Root, 1280, 720), Path.Combine(dir, "overlay.png"));
+        Save(RenderElement(overlay.Root, 1280, 720), Path.Combine(dir, $"overlay{suffix}.png"));
 
         var queue = new ShotQueue();
         queue.Add(shot);
-        queue.Add(SampleShot());
+        queue.Add(second);
         var strip = new StripWindow();
         strip.Refresh(queue);
-        strip.SetStatus("2 снимка · 4 комментария", true);
-        var content = (FrameworkElement)strip.Content;
-        strip.Content = null;
-        Save(RenderElement(content, 206, 400), Path.Combine(dir, "strip.png"));
-    });
+        strip.SetStatus(L.Shots(2) + " · " + L.Comments(4), true);
+        SaveWindowContent(strip, Path.Combine(dir, $"strip{suffix}.png"));
 
-    private static Shot SampleShot()
+        var settings = new SettingsWindow(new Settings.AppSettings(), new Input.KeyRouter(() => Input.PasteDecision.Pass));
+        SaveWindowContent(settings, Path.Combine(dir, $"settings{suffix}.png"));
+
+        Save(RenderChatField([shot, second]), Path.Combine(dir, $"chat{suffix}.png"));
+    }
+
+    private static void SaveWindowContent(Window window, string path)
     {
+        var content = (FrameworkElement)window.Content;
+        window.Content = null;
+        content.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        Save(RenderElement(content, (int)Math.Ceiling(content.DesiredSize.Width), (int)Math.Ceiling(content.DesiredSize.Height)), path);
+    }
+
+    private static readonly Brush PageInk = FrozenBrush(0x20, 0x21, 0x24);
+    private static readonly Brush PageMuted = FrozenBrush(0x5F, 0x63, 0x68);
+    private static readonly Brush PageFaint = FrozenBrush(0x9A, 0xA0, 0xA6);
+    private static readonly Brush PageBlue = FrozenBrush(0x1A, 0x73, 0xE8);
+    private static readonly Pen PageLine = FrozenPen(FrozenBrush(0xDA, 0xDC, 0xE0), 1);
+
+    // Each test runs on its own thread, and only frozen objects can cross threads.
+    private static Brush FrozenBrush(byte r, byte g, byte b)
+    {
+        var brush = new SolidColorBrush(Color.FromRgb(r, g, b));
+        brush.Freeze();
+        return brush;
+    }
+
+    private static Pen FrozenPen(Brush brush, double thickness)
+    {
+        var pen = new Pen(brush, thickness);
+        pen.Freeze();
+        return pen;
+    }
+
+    private static FormattedText PageText(string text, double size, Brush brush, FontWeight weight = default)
+    {
+        var typeface = new Typeface(new FontFamily("Segoe UI"), FontStyles.Normal,
+            weight == default ? FontWeights.Normal : weight, FontStretches.Normal);
+#pragma warning disable CS0618 // Offscreen rendering, so there is no window to take a DPI from.
+        return new FormattedText(text, System.Globalization.CultureInfo.CurrentCulture, FlowDirection.LeftToRight, typeface, size, brush);
+#pragma warning restore CS0618
+    }
+
+    private static void DrawCentered(DrawingContext dc, FormattedText text, double centerX, double y) =>
+        dc.DrawText(text, new Point(centerX - text.Width / 2, y));
+
+    /// <summary>A made-up pricing page with real things to point at: a dull button, a small price and a typo.</summary>
+    private static BitmapSource SamplePage(bool english)
+    {
+        string T(string russian, string other) => english ? other : russian;
+        var perMonth = T("в месяц", "per month");
+        var action = T("Подключить", "Get started");
+
         var visual = new DrawingVisual();
         using (var dc = visual.RenderOpen())
         {
-            dc.DrawRectangle(new SolidColorBrush(Color.FromRgb(0xF7, 0xF8, 0xFA)), null, new Rect(0, 0, 1280, 720));
-            dc.DrawRectangle(new SolidColorBrush(Color.FromRgb(0x2F, 0x6F, 0xED)), null, new Rect(0, 0, 1280, 64));
-            dc.DrawRectangle(new SolidColorBrush(Color.FromRgb(0xBB, 0xDE, 0xFB)), null, new Rect(80, 120, 1120, 220));
-            dc.DrawRectangle(new SolidColorBrush(Color.FromRgb(0x4C, 0xAF, 0x50)), null, new Rect(120, 270, 160, 44));
-            for (var i = 0; i < 3; i++)
-                dc.DrawRectangle(Brushes.White, new Pen(Brushes.LightGray, 1), new Rect(80 + i * 380, 380, 360, 280));
+            dc.DrawRectangle(new SolidColorBrush(Color.FromRgb(0xF6, 0xF7, 0xF9)), null, new Rect(0, 0, 1280, 720));
+            dc.DrawRectangle(Brushes.White, null, new Rect(0, 0, 1280, 64));
+            dc.DrawLine(PageLine, new Point(0, 64), new Point(1280, 64));
+            dc.DrawText(PageText(T("Облачко", "Cloudlet"), 22, PageBlue, FontWeights.Bold), new Point(48, 16));
+            dc.DrawText(PageText("anna.petrova@example.com", 14, PageMuted), new Point(1060, 22));
+
+            DrawCentered(dc, PageText(T("Выберите тариф", "Choose your plan"), 34, PageInk, FontWeights.SemiBold), 640, 92);
+            DrawCentered(dc, PageText(T("Оплата помесячно. Отменить можно в любой момент.", "Billed monthly. Cancel anytime."), 16, PageMuted), 640, 142);
+
+            DrawCard(dc, 110, T("Старт", "Starter"), T("0 ₽", "$0"), 40, PageInk, perMonth, action,
+                [T("1 проект", "1 project"), T("2 ГБ в облаке", "2 GB of storage"), T("Поддержка по почте", "Email support")], PageBlue, Brushes.White, false);
+            DrawCard(dc, 480, T("Про", "Pro"), T("490 ₽", "$9"), 40, PageInk, perMonth, action,
+                [T("Вся история файлов", "Full file history"), T("Безлимитные проэкты", "Unlimited projcts"), T("50 ГБ в облаке", "50 GB of storage")],
+                FrozenBrush(0xE8, 0xEA, 0xED), PageFaint, true);
+            DrawCard(dc, 850, T("Команда", "Team"), T("1 490 ₽", "$29"), 18, PageFaint, perMonth, action,
+                [T("До 20 участников", "Up to 20 members"), T("Приоритетная поддержка", "Priority support"), T("1 ТБ в облаке", "1 TB of storage")], PageBlue, Brushes.White, false);
         }
         var image = new RenderTargetBitmap(1280, 720, 96, 96, PixelFormats.Pbgra32);
         image.Render(visual);
         image.Freeze();
+        return image;
+    }
 
-        var shot = new Shot(image, 1.0);
-        shot.History.Apply(shot.State.AddMark(new PixelRect(110, 262, 180, 60)).WithComment(0, "Кнопку ярче и крупнее"));
-        shot.History.Apply(shot.State.AddMark(new PixelRect(860, 600, 0, 0)).WithComment(1, "Цену больше"));
+    private static void DrawCard(DrawingContext dc, double x, string name, string price, double priceSize, Brush priceBrush,
+        string period, string action, string[] features, Brush button, Brush buttonText, bool highlighted)
+    {
+        const double width = 320, top = 196, height = 470;
+        var edge = highlighted ? new Pen(PageBlue, 2) : PageLine;
+        dc.DrawRoundedRectangle(Brushes.White, edge, new Rect(x, top, width, height), 14, 14);
+        dc.DrawText(PageText(name, 20, PageInk, FontWeights.SemiBold), new Point(x + 28, top + 24));
+        dc.DrawText(PageText(price, priceSize, priceBrush, FontWeights.Bold), new Point(x + 28, top + 84));
+        dc.DrawText(PageText(period, 14, PageMuted), new Point(x + 28, top + 142));
+
+        for (var i = 0; i < features.Length; i++)
+        {
+            var y = top + 192 + i * 44;
+            dc.DrawText(PageText("✓", 16, PageBlue, FontWeights.Bold), new Point(x + 28, y));
+            dc.DrawText(PageText(features[i], 16, PageInk), new Point(x + 54, y));
+        }
+
+        var buttonRect = new Rect(x + 28, top + height - 76, width - 56, 48);
+        dc.DrawRoundedRectangle(button, null, buttonRect, 8, 8);
+        DrawCentered(dc, PageText(action, 16, buttonText, FontWeights.SemiBold), x + width / 2, buttonRect.Y + 12);
+    }
+
+    private static Shot SampleShot(bool english)
+    {
+        var shot = new Shot(SamplePage(english), 1.0);
+        shot.History.Apply(shot.State.AddMark(new PixelRect(498, 582, 284, 64))
+            .WithComment(0, english ? "Make the button brighter and bigger" : "Кнопку ярче и крупнее"));
+        shot.History.Apply(shot.State.AddMark(new PixelRect(870, 272, 110, 40))
+            .WithComment(1, english ? "Make the price stand out" : "Цену сделать заметнее"));
+
+        // The pin sits just past the typo, so its badge doesn't hide it.
+        shot.History.Apply(shot.State.AddMark(new PixelRect(english ? 682 : 742, 443, 0, 0))
+            .WithComment(2, english ? "Typo: “projects”" : "Опечатка"));
         shot.History.Apply(shot.State.AddRedaction(new RedactionStroke(
-            [new PixelPoint(120, 440), new PixelPoint(380, 440)], 26)));
+            [new PixelPoint(1066, 33), new PixelPoint(1232, 33)], 24)));
         return shot;
+    }
+
+    private static Shot SecondSampleShot(bool english)
+    {
+        var shot = new Shot(SamplePage(english), 1.0);
+        shot.History.Apply(shot.State.AddMark(new PixelRect(872, 430, 256, 30))
+            .WithComment(0, english ? "Remove this item" : "Этот пункт убрать"));
+        shot.History.Apply(shot.State.ApplyCrop(new PixelRect(838, 186, 344, 490)));
+        return shot;
+    }
+
+    /// <summary>A chat's input field after pasting: the real final images and the real comment text.</summary>
+    private static BitmapSource RenderChatField(IReadOnlyList<Shot> shots)
+    {
+        const double width = 860, padding = 24, imageHeight = 300, gap = 12, scale = 2;
+
+        var text = PageText(MessageFormatter.Format(shots.Select(s => s.State).ToList()), 16, PageInk);
+        text.MaxTextWidth = width - 2 * padding;
+        text.LineHeight = 24;
+        var height = padding + imageHeight + 18 + text.Height + padding;
+
+        var visual = new DrawingVisual();
+        RenderOptions.SetBitmapScalingMode(visual, BitmapScalingMode.Fant);
+        using (var dc = visual.RenderOpen())
+        {
+            dc.PushTransform(new ScaleTransform(scale, scale));
+            dc.DrawRoundedRectangle(Brushes.White, PageLine, new Rect(0.5, 0.5, width - 1, height - 1), 20, 20);
+
+            var x = padding;
+            for (var i = 0; i < shots.Count; i++)
+            {
+                var final = ShotRenderer.RenderFinal(shots[i], i);
+                var imageWidth = imageHeight * final.PixelWidth / final.PixelHeight;
+                var slot = new Rect(x, padding, imageWidth, imageHeight);
+                dc.PushClip(new RectangleGeometry(slot, 10, 10));
+                dc.DrawImage(final, slot);
+                dc.Pop();
+                dc.DrawRoundedRectangle(null, PageLine, slot, 10, 10);
+                x += imageWidth + gap;
+            }
+
+            dc.DrawText(text, new Point(padding, padding + imageHeight + 18));
+
+            var send = new Point(width - padding - 20, height - padding - 20);
+            dc.DrawEllipse(new SolidColorBrush(Color.FromRgb(0xFF, 0xC4, 0x00)), null, send, 20, 20);
+            DrawCentered(dc, PageText("↑", 20, PageInk, FontWeights.Bold), send.X, send.Y - 14);
+            dc.Pop();
+        }
+
+        var image = new RenderTargetBitmap((int)(width * scale), (int)Math.Ceiling(height * scale), 96, 96, PixelFormats.Pbgra32);
+        image.Render(visual);
+        image.Freeze();
+        return image;
     }
 
     private static BitmapSource RenderElement(FrameworkElement element, int width, int height)

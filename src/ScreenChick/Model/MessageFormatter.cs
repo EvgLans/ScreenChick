@@ -1,4 +1,5 @@
 using System.Text;
+using ScreenChick.Localization;
 
 namespace ScreenChick.Model;
 
@@ -14,7 +15,7 @@ public static class MessageFormatter
             if (shots[s].CommentCount == 0) continue;
 
             if (text.Length > 0) text.Append("\r\n\r\n");
-            text.Append("Снимок ").Append(ShotQueue.LetterOf(s));
+            text.Append(L.ShotHeading).Append(' ').Append(ShotQueue.LetterOf(s));
             for (var m = 0; m < marks.Count; m++)
             {
                 if (string.IsNullOrWhiteSpace(marks[m].Comment)) continue;

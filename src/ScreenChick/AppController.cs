@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Threading;
 using ScreenChick.Capture;
 using ScreenChick.Input;
+using ScreenChick.Localization;
 using ScreenChick.Model;
 using ScreenChick.Native;
 using ScreenChick.Paste;
@@ -14,15 +15,15 @@ namespace ScreenChick;
 /// <summary>Wires the tray, keyboard hook, overlay, strip and paste sequence together.</summary>
 internal sealed class AppController : IDisposable
 {
-    private readonly AppSettings _settings = AppSettings.Load();
+    private readonly AppSettings _settings = LoadSettings();
     private readonly ShotQueue _queue = new();
-    private readonly StripWindow _strip = new();
     private readonly DispatcherTimer _clipboardWatch = new() { Interval = TimeSpan.FromMilliseconds(500) };
     private readonly Forms.NotifyIcon _tray;
     private readonly KeyRouter _router;
     private readonly KeyboardHook _hook;
     private readonly uint _ownProcessId = (uint)Environment.ProcessId;
 
+    private StripWindow _strip;
     private OverlayWindow? _overlay;
     private SettingsWindow? _settingsWindow;
 
@@ -36,11 +37,7 @@ internal sealed class AppController : IDisposable
     {
         _tray = CreateTray();
 
-        _strip.NewShotRequested += StartNewShot;
-        _strip.PasteRequested += OnPasteButton;
-        _strip.ClearRequested += _queue.Clear;
-        _strip.EditRequested += EditShot;
-        _strip.RemoveRequested += _queue.RemoveAt;
+        _strip = CreateStrip();
         _queue.Changed += OnQueueChanged;
 
         _clipboardWatch.Tick += (_, _) => RefreshStripStatus();
@@ -48,8 +45,26 @@ internal sealed class AppController : IDisposable
         _router = new KeyRouter(DecidePaste) { Hotkey = _settings.Hotkey };
         _hook = new KeyboardHook(_router, OnKeyAction);
 
-        _tray.ShowBalloonTip(3000, "Кря! ScreenChick запущен",
-            $"{_settings.Hotkey.Display}: новый снимок. Значок в трее: настройки и выход.", Forms.ToolTipIcon.None);
+        _tray.ShowBalloonTip(3000, L.StartedTitle, L.StartedBody(_settings.Hotkey.Display), Forms.ToolTipIcon.None);
+    }
+
+    /// <summary>Runs before the windows are created, because they read their text once.</summary>
+    private static AppSettings LoadSettings()
+    {
+        var settings = AppSettings.Load();
+        L.Use(settings.Language);
+        return settings;
+    }
+
+    private StripWindow CreateStrip()
+    {
+        var strip = new StripWindow();
+        strip.NewShotRequested += StartNewShot;
+        strip.PasteRequested += OnPasteButton;
+        strip.ClearRequested += _queue.Clear;
+        strip.EditRequested += EditShot;
+        strip.RemoveRequested += _queue.RemoveAt;
+        return strip;
     }
 
     /// <summary>
@@ -97,7 +112,7 @@ internal sealed class AppController : IDisposable
 
         if (_queue.IsFull)
         {
-            Notify($"В ленте уже {ShotQueue.MaxShots} снимков. Убери лишние или очисти ленту.");
+            Notify(L.StripFull(ShotQueue.MaxShots));
             return;
         }
 
@@ -178,10 +193,9 @@ internal sealed class AppController : IDisposable
     {
         var armed = NativeMethods.GetClipboardSequenceNumber() == Volatile.Read(ref _clipboardBaseline);
         var comments = _queue.Shots.Sum(s => s.State.CommentCount);
-        var summary = MessageFormatter.Plural(_queue.Count, "снимок", "снимка", "снимков") + " · " +
-                      MessageFormatter.Plural(comments, "комментарий", "комментария", "комментариев");
+        var summary = L.Shots(_queue.Count) + " · " + L.Comments(comments);
 
-        _strip.SetStatus(armed ? summary : summary + "\nТы что-то скопировал, поэтому Ctrl+V вставит это. Снимки: кнопка выше.", armed);
+        _strip.SetStatus(armed ? summary : summary + "\n" + L.StripCopiedNotice, armed);
     }
 
     private void ArmClipboard() =>
@@ -202,10 +216,10 @@ internal sealed class AppController : IDisposable
             switch (outcome)
             {
                 case PasteOutcome.FocusLost:
-                    Notify("Вставка остановлена: ты переключил окно. Снимки остались в ленте.");
+                    Notify(L.PasteStoppedFocus);
                     break;
                 case PasteOutcome.ClipboardBusy:
-                    Notify("Буфер обмена занят другой программой. Снимки остались в ленте, попробуй ещё раз.");
+                    Notify(L.PasteStoppedClipboard);
                     break;
             }
         }
@@ -216,20 +230,24 @@ internal sealed class AppController : IDisposable
         }
     }
 
-    private Forms.NotifyIcon CreateTray()
+    private Forms.ContextMenuStrip CreateMenu()
     {
         var menu = new Forms.ContextMenuStrip();
-        menu.Items.Add("Новый снимок", null, (_, _) => StartNewShot());
-        menu.Items.Add("Очистить ленту", null, (_, _) => _queue.Clear());
+        menu.Items.Add(L.MenuNewShot, null, (_, _) => StartNewShot());
+        menu.Items.Add(L.MenuClear, null, (_, _) => _queue.Clear());
         menu.Items.Add(new Forms.ToolStripSeparator());
-        menu.Items.Add("Настройки…", null, (_, _) => OpenSettings());
-        menu.Items.Add("Выход", null, (_, _) => Application.Current.Shutdown());
+        menu.Items.Add(L.MenuSettings, null, (_, _) => OpenSettings());
+        menu.Items.Add(L.MenuExit, null, (_, _) => Application.Current.Shutdown());
+        return menu;
+    }
 
+    private Forms.NotifyIcon CreateTray()
+    {
         var icon = new Forms.NotifyIcon
         {
             Icon = System.Drawing.Icon.ExtractAssociatedIcon(Environment.ProcessPath!),
             Text = "ScreenChick",
-            ContextMenuStrip = menu,
+            ContextMenuStrip = CreateMenu(),
             Visible = true,
         };
         icon.MouseClick += (_, e) =>
@@ -248,10 +266,24 @@ internal sealed class AppController : IDisposable
         }
 
         _settingsWindow = new SettingsWindow(_settings, _router);
-        _settingsWindow.Saved += () => _router.Hotkey = _settings.Hotkey;
+        _settingsWindow.Saved += OnSettingsSaved;
         _settingsWindow.Closed += (_, _) => _settingsWindow = null;
         _settingsWindow.Show();
         _settingsWindow.Activate();
+    }
+
+    private void OnSettingsSaved()
+    {
+        _router.Hotkey = _settings.Hotkey;
+        if (!L.Use(_settings.Language)) return;
+
+        // The shots live in the queue, so swapping the strip loses nothing.
+        _strip.Close();
+        _strip = CreateStrip();
+        var oldMenu = _tray.ContextMenuStrip;
+        _tray.ContextMenuStrip = CreateMenu();
+        oldMenu?.Dispose();
+        if (_overlay == null) RefreshStripVisibility();
     }
 
     private void Notify(string message) =>

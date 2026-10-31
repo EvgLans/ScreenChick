@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Win32;
 using ScreenChick.Input;
+using ScreenChick.Localization;
 
 namespace ScreenChick.Settings;
 
@@ -11,6 +12,7 @@ public sealed class AppSettings
     public const int MinPasteDelayMs = 100;
     public const int MaxPasteDelayMs = 2000;
 
+    public UiLanguage Language { get; set; } = UiLanguage.Auto;
     public int HotkeyVk { get; set; } = Hotkey.VkPrintScreen;
     public KeyMods HotkeyMods { get; set; } = KeyMods.None;
     public int PasteDelayMs { get; set; } = 400;

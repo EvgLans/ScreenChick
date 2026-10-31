@@ -1,5 +1,6 @@
 using System.Windows;
 using ScreenChick.Input;
+using ScreenChick.Localization;
 using ScreenChick.Settings;
 
 namespace ScreenChick.UI;
@@ -19,6 +20,7 @@ public partial class SettingsWindow : Window
         _router = router;
         _hotkey = settings.Hotkey;
 
+        LanguageBox.SelectedIndex = (int)settings.Language;
         HotkeyText.Text = _hotkey.Display;
         DelaySlider.Minimum = AppSettings.MinPasteDelayMs;
         DelaySlider.Maximum = AppSettings.MaxPasteDelayMs;
@@ -37,18 +39,19 @@ public partial class SettingsWindow : Window
 
     private void OnRecord(object sender, RoutedEventArgs e)
     {
-        HotkeyText.Text = "Нажми клавишу… (Esc: отмена)";
+        HotkeyText.Text = L.HotkeyRecording;
         RecordButton.IsEnabled = false;
         _router.BeginRecording();
     }
 
     private void OnDelayChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
-        if (DelayText != null) DelayText.Text = $"{(int)e.NewValue} мс";
+        if (DelayText != null) DelayText.Text = L.Milliseconds((int)e.NewValue);
     }
 
     private void OnSave(object sender, RoutedEventArgs e)
     {
+        _settings.Language = (UiLanguage)LanguageBox.SelectedIndex;
         _settings.HotkeyVk = _hotkey.Vk;
         _settings.HotkeyMods = _hotkey.Mods;
         _settings.PasteDelayMs = (int)DelaySlider.Value;

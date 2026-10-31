@@ -160,6 +160,69 @@ function Write-WizardBitmap([string]$path, [int]$width, [int]$height, [Drawing.C
     $image.Dispose()
 }
 
+# The README's banner. The word "Chick" is marked up the way the app marks a screenshot.
+function Write-Banner([string]$path) {
+    $width = 1600; $height = 400
+    $image = New-Object Drawing.Bitmap $width, $height, ([Drawing.Imaging.PixelFormat]::Format32bppArgb)
+    $g = [Drawing.Graphics]::FromImage($image)
+    $g.SmoothingMode = [Drawing.Drawing2D.SmoothingMode]::AntiAlias
+    $g.InterpolationMode = [Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+
+    $card = New-RoundedRect 0 0 $width $height 28
+    $night = New-Object Drawing.SolidBrush ([Drawing.Color]::FromArgb(0x1B, 0x1C, 0x20))
+    $g.FillPath($night, $card)
+    $night.Dispose(); $card.Dispose()
+
+    $chick = New-Chick 300 $true
+    $g.DrawImage($chick, 110, 50, 300, 300)
+    $chick.Dispose()
+
+    $family = New-Object Drawing.FontFamily 'Segoe UI'
+    $bold = [int][Drawing.FontStyle]::Bold
+    $first = New-Object Drawing.Drawing2D.GraphicsPath
+    $first.AddString('Screen', $family, $bold, 150, (New-Object Drawing.PointF 470, 105), [Drawing.StringFormat]::GenericTypographic)
+    $second = New-Object Drawing.Drawing2D.GraphicsPath
+    $left = $first.GetBounds().Right + 34
+    $second.AddString('Chick', $family, $bold, 150, (New-Object Drawing.PointF $left, 105), [Drawing.StringFormat]::GenericTypographic)
+    $g.FillPath([Drawing.Brushes]::White, $first)
+    $fill = New-Object Drawing.SolidBrush $yellow
+    $g.FillPath($fill, $second)
+
+    $word = $second.GetBounds()
+    $frame = New-RoundedRect ($word.X - 18) ($word.Y - 16) ($word.Width + 36) ($word.Height + 32) 12
+    $pen = New-Object Drawing.Pen $beak, 6
+    $g.DrawPath($pen, $frame)
+    $pen.Dispose(); $frame.Dispose()
+
+    $badgeX = $word.X - 21; $badgeY = $word.Y - 16 - 52
+    $badge = New-RoundedRect $badgeX $badgeY 92 50 10
+    $g.FillPath($fill, $badge)
+    $edgePen = New-Object Drawing.Pen $beak, 3
+    $g.DrawPath($edgePen, $badge)
+    $edgePen.Dispose(); $badge.Dispose()
+    $label = New-Object Drawing.Drawing2D.GraphicsPath
+    $label.AddString('A1', $family, $bold, 34, (New-Object Drawing.PointF ($badgeX + 22), ($badgeY + 7)), [Drawing.StringFormat]::GenericTypographic)
+    $dark = New-Object Drawing.SolidBrush $ink
+    $g.FillPath($dark, $label)
+    $dark.Dispose(); $label.Dispose(); $fill.Dispose(); $first.Dispose(); $second.Dispose()
+
+    $g.Dispose()
+    $image.Save($path, [Drawing.Imaging.ImageFormat]::Png)
+    $image.Dispose()
+}
+
+function New-RoundedRect([double]$x, [double]$y, [double]$w, [double]$h, [double]$r) {
+    $path = New-Object Drawing.Drawing2D.GraphicsPath
+    $d = 2 * $r
+    $path.AddArc($x, $y, $d, $d, 180, 90)
+    $path.AddArc($x + $w - $d, $y, $d, $d, 270, 90)
+    $path.AddArc($x + $w - $d, $y + $h - $d, $d, $d, 0, 90)
+    $path.AddArc($x, $y + $h - $d, $d, $d, 90, 90)
+    $path.CloseFigure()
+    $path
+}
+
+Write-Banner (Join-Path $root 'docs\banner.png')
 Write-Icon (Join-Path $root 'src\ScreenChick\app.ico')
 Write-Png (Join-Path $root 'src\ScreenChick\Assets\logo.png') 64 $false
 Write-Png (Join-Path $root 'docs\logo.png') 256 $true

@@ -28,6 +28,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
 Compression=lzma2/ultra64
 SolidCompression=yes
+ShowLanguageDialog=no
 WizardStyle=modern
 WizardImageFile=wizard-large.bmp
 WizardSmallImageFile=wizard-small.bmp
@@ -36,11 +37,18 @@ WizardSmallImageFile=wizard-small.bmp
 AppMutex=Local\ScreenChick.SingleInstance
 
 [Languages]
+Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
 
+[CustomMessages]
+english.TaskAutostart=Start ScreenChick when I sign in to Windows
+russian.TaskAutostart=Запускать ScreenChick при входе в Windows
+english.TaskDesktop=Create a desktop icon
+russian.TaskDesktop=Создать значок на рабочем столе
+
 [Tasks]
-Name: "autostart"; Description: "Запускать ScreenChick при входе в Windows"
-Name: "desktopicon"; Description: "Создать значок на рабочем столе"; Flags: unchecked
+Name: "autostart"; Description: "{cm:TaskAutostart}"
+Name: "desktopicon"; Description: "{cm:TaskDesktop}"; Flags: unchecked
 
 [Files]
 Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -54,7 +62,7 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopico
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "ScreenChick"; ValueData: """{app}\{#AppExe}"""; Tasks: autostart
 
 [Run]
-Filename: "{app}\{#AppExe}"; Description: "Запустить ScreenChick"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
 
 [Code]
 // Autostart may have been turned on in the app's settings, so this can't depend on the install task.
